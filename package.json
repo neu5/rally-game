@@ -1,4 +1,6 @@
 {
+  "name": "racer-starter",
+  "packageManager": "yarn@4.9.2",
   "private": true,
   "scripts": {
     "start": "http-server ."
