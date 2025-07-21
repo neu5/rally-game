@@ -17,6 +17,15 @@ const angularFriction = 0.01;
 const maxAngularSpeed = 0.03;
 const handbrakeAngularBoost = 1.8; // Multiplies turning sharpness
 const handbrakeFrictionMultiplier = 0.4; // Reduces grip
+let isDragging = false;
+let previousMouseX = 0;
+const dragRotateSpeed = 0.005; // Smaller = slower rotation
+let cameraAngle = 0;
+const cameraRadius = 15;
+let cameraHeight = 12; // This is now adjustable
+const minCameraHeight = 5;
+const maxCameraHeight = 25;
+const verticalDragSpeed = 0.05; // How sensitive vertical drag is
 
 // Setup
 init();
@@ -85,6 +94,39 @@ function init() {
   window.addEventListener("keyup", (e) => {
     keys[e.key.toLowerCase()] = false;
     if (e.code === "Space") keys["space"] = false;
+  });
+
+  // Mouse drag for camera rotation
+  window.addEventListener("mousedown", (e) => {
+    if (e.button === 0) {
+      // Left mouse button
+      isDragging = true;
+      previousMouseX = e.clientX;
+    }
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (e.button === 0) {
+      isDragging = false;
+    }
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (isDragging) {
+      const deltaX = e.clientX - previousMouseX;
+      const deltaY = e.movementY; // or e.clientY - previousMouseY
+
+      cameraAngle -= deltaX * dragRotateSpeed;
+
+      // Adjust camera height with vertical drag (clamped)
+      cameraHeight -= deltaY * verticalDragSpeed;
+      cameraHeight = Math.max(
+        minCameraHeight,
+        Math.min(maxCameraHeight, cameraHeight)
+      );
+
+      previousMouseX = e.clientX;
+    }
   });
 }
 
@@ -169,15 +211,12 @@ function updateCar() {
 }
 
 function updateCamera() {
-  const height = 15;
-  const behind = 10;
-
-  const offsetX = Math.sin(car.rotation.y) * behind;
-  const offsetZ = Math.cos(car.rotation.y) * behind;
+  const offsetX = Math.sin(cameraAngle) * cameraRadius;
+  const offsetZ = Math.cos(cameraAngle) * cameraRadius;
 
   camera.position.x = car.position.x + offsetX;
   camera.position.z = car.position.z + offsetZ;
-  camera.position.y = car.position.y + height;
+  camera.position.y = car.position.y + cameraHeight;
 
   camera.lookAt(car.position);
 }
