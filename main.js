@@ -70,8 +70,25 @@ function init() {
   const carGeometry = new THREE.BoxGeometry(2, 1, 4);
   const carMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
   car = new THREE.Mesh(carGeometry, carMaterial);
-  car.position.y = 0.5;
+  car.position.y = 0.9;
   scene.add(car);
+
+  const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
+  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
+
+  // Helper function to create and position wheels
+  function createWheel(x, z) {
+    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+    wheel.rotation.z = Math.PI / 2; // Make cylinder lay flat
+    wheel.position.set(x, -0.5, z); // correct if car Y is now 0.9
+    car.add(wheel); // Attach to car so it moves/rotates with it
+  }
+
+  // Front-left, front-right, rear-left, rear-right
+  createWheel(-0.9, 1.5); // Left front
+  createWheel(0.9, 1.5); // Right front
+  createWheel(-0.9, -1.5); // Left rear
+  createWheel(0.9, -1.5); // Right rear
 
   const axesHelper = new THREE.AxesHelper(5);
   scene.add(axesHelper);
