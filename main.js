@@ -3,6 +3,7 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 let scene, camera, renderer;
 let car;
 const keys = {};
+const wheels = [];
 
 // Car physics state
 let velocity = 0;
@@ -26,6 +27,7 @@ let cameraHeight = 12; // This is now adjustable
 const minCameraHeight = 5;
 const maxCameraHeight = 25;
 const verticalDragSpeed = 0.05; // How sensitive vertical drag is
+let lastCarPosition = new THREE.Vector3();
 
 // Setup
 init();
@@ -73,15 +75,35 @@ function init() {
   car.position.y = 0.9;
   scene.add(car);
 
+  lastCarPosition.copy(car.position);
+
   const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
   const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
 
-  // Helper function to create and position wheels
   function createWheel(x, z) {
     const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-    wheel.rotation.z = Math.PI / 2; // Make cylinder lay flat
-    wheel.position.set(x, -0.5, z); // correct if car Y is now 0.9
-    car.add(wheel); // Attach to car so it moves/rotates with it
+
+    // Rotate wheel to lay flat
+    wheel.rotation.z = Math.PI / 2;
+
+    // Position the wheel relative to the car
+    wheel.position.set(x, -0.5, z);
+
+    // Create a visible spinning marker (a long bar across the wheel face)
+    const markerLength = 0.3;
+    const markerGeometry = new THREE.BoxGeometry(markerLength, 0.02, 0.02);
+    const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+
+    // Place marker on correct face of wheel
+    // Left wheels (x < 0): marker goes on +Y
+    // Right wheels (x > 0): marker goes on -Y
+    const yOffset = 0.16; // Outside the face
+    marker.position.set(0, x < 0 ? yOffset : -yOffset, 0);
+
+    wheel.add(marker);
+    car.add(wheel);
+    wheels.push(wheel);
   }
 
   // Front-left, front-right, rear-left, rear-right
@@ -158,6 +180,7 @@ function animate() {
 
   updateCar();
   updateCamera();
+  updateWheelRotation();
 
   renderer.render(scene, camera);
 }
@@ -236,4 +259,33 @@ function updateCamera() {
   camera.position.y = car.position.y + cameraHeight;
 
   camera.lookAt(car.position);
+}
+
+function updateWheelRotation() {
+  const currentPos = car.position.clone();
+  const movementVec = currentPos.clone().sub(lastCarPosition);
+  lastCarPosition.copy(currentPos);
+
+  // No movement → no rotation
+  if (movementVec.length() === 0) return;
+
+  // Get car's forward direction vector
+  const forward = new THREE.Vector3(
+    -Math.sin(car.rotation.y),
+    0,
+    -Math.cos(car.rotation.y)
+  );
+
+  // Dot product: +1 = forward, -1 = reverse
+  const directionSign = Math.sign(forward.dot(movementVec));
+
+  // Compute how much to rotate wheels
+  const wheelRadius = 0.4;
+  const distanceMoved = movementVec.length();
+  const rotationAmount = -directionSign * (distanceMoved / wheelRadius);
+
+  // Apply to all wheels
+  for (const wheel of wheels) {
+    wheel.rotation.x += rotationAmount;
+  }
 }
