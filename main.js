@@ -1,50 +1,98 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 let scene, camera, renderer;
-let car;
 const keys = {};
-const wheels = [];
 
-// Car physics state
-let velocity = 0;
-const maxSpeed = 0.5;
-const acceleration = 0.01;
-const deceleration = 0.02;
-const friction = 0.01;
-const rotateSpeed = 0.03;
-let angularVelocity = 0;
-const angularAcceleration = 0.002;
-const angularFriction = 0.01;
-const maxAngularSpeed = 0.03;
-const handbrakeAngularBoost = 1.8; // Multiplies turning sharpness
-const handbrakeFrictionMultiplier = 0.4; // Reduces grip
-let isDragging = false;
-let previousMouseX = 0;
-const dragRotateSpeed = 0.005; // Smaller = slower rotation
+// Car camera config
 let cameraAngle = 0;
-const cameraRadius = 15;
-let cameraHeight = 12; // This is now adjustable
+let cameraRadius = 15;
+let cameraHeight = 12;
 const minCameraHeight = 5;
 const maxCameraHeight = 25;
-const verticalDragSpeed = 0.05; // How sensitive vertical drag is
-let lastCarPosition = new THREE.Vector3();
+const dragRotateSpeed = 0.005;
+const verticalDragSpeed = 0.05;
 
-// Setup
+// Mouse drag
+let isDragging = false;
+let previousMouseX = 0;
+
+// Player car
+let playerCar;
+
 init();
 animate();
 
+// ==============================
+// 🏎️ Car Creation Factory
+// ==============================
+function createCar({
+  color = 0xff0000,
+  position = new THREE.Vector3(0, 0, 0),
+} = {}) {
+  const car = new THREE.Group();
+
+  // Body
+  const bodyGeometry = new THREE.BoxGeometry(2, 1, 4);
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color });
+  const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+  body.position.y = 0.5;
+  car.add(body);
+
+  // Wheels
+  const wheels = [];
+  const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
+  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
+
+  const wheelPositions = [
+    [-0.9, -0.5, 1.5], // FL
+    [0.9, -0.5, 1.5], // FR
+    [-0.9, -0.5, -1.5], // RL
+    [0.9, -0.5, -1.5], // RR
+  ];
+
+  for (const [x, y, z] of wheelPositions) {
+    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, y, z);
+
+    // Marker to show rotation
+    const markerGeometry = new THREE.BoxGeometry(0.3, 0.02, 0.02);
+    const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    marker.position.set(0, x < 0 ? 0.16 : -0.16, 0);
+    wheel.add(marker);
+
+    car.add(wheel);
+    wheels.push(wheel);
+  }
+
+  car.position.set(position.x, 0.9, position.z);
+  scene.add(car);
+
+  return {
+    mesh: car,
+    wheels,
+    velocity: 0,
+    angularVelocity: 0,
+    lastPosition: car.position.clone(),
+  };
+}
+
+// ==============================
+// 🚀 Init
+// ==============================
 function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x202020);
 
-  // Camera (top-down with adjustable angle)
+  // Camera
   camera = new THREE.PerspectiveCamera(
     75,
     window.innerWidth / window.innerHeight,
     0.1,
     1000
   );
-  camera.position.set(0, 50, 0);
+  camera.position.set(0, 15, 15);
   camera.lookAt(0, 0, 0);
 
   // Renderer
@@ -62,102 +110,48 @@ function init() {
   scene.add(dirLight);
 
   // Ground
-  const groundGeometry = new THREE.PlaneGeometry(200, 200);
-  const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x444444 });
-  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshPhongMaterial({ color: 0x444444 })
+  );
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
-  // Car
-  const carGeometry = new THREE.BoxGeometry(2, 1, 4);
-  const carMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-  car = new THREE.Mesh(carGeometry, carMaterial);
-  car.position.y = 0.9;
-  scene.add(car);
+  // Player Car
+  playerCar = createCar({
+    color: 0x00ff00,
+    position: new THREE.Vector3(0, 0, 0),
+  });
 
-  lastCarPosition.copy(car.position);
-
-  const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
-  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
-
-  function createWheel(x, z) {
-    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-
-    // Rotate wheel to lay flat
-    wheel.rotation.z = Math.PI / 2;
-
-    // Position the wheel relative to the car
-    wheel.position.set(x, -0.5, z);
-
-    // Create a visible spinning marker (a long bar across the wheel face)
-    const markerLength = 0.3;
-    const markerGeometry = new THREE.BoxGeometry(markerLength, 0.02, 0.02);
-    const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
-
-    // Place marker on correct face of wheel
-    // Left wheels (x < 0): marker goes on +Y
-    // Right wheels (x > 0): marker goes on -Y
-    const yOffset = 0.16; // Outside the face
-    marker.position.set(0, x < 0 ? yOffset : -yOffset, 0);
-
-    wheel.add(marker);
-    car.add(wheel);
-    wheels.push(wheel);
-  }
-
-  // Front-left, front-right, rear-left, rear-right
-  createWheel(-0.9, 1.5); // Left front
-  createWheel(0.9, 1.5); // Right front
-  createWheel(-0.9, -1.5); // Left rear
-  createWheel(0.9, -1.5); // Right rear
-
-  const axesHelper = new THREE.AxesHelper(5);
-  scene.add(axesHelper);
-
-  const gridHelper = new THREE.GridHelper(200, 20);
-  scene.add(gridHelper);
-
-  // Resize handling
+  // Resize
   window.addEventListener("resize", onWindowResize, false);
 
-  // Key controls
-  window.addEventListener("keydown", (e) => (keys[e.key.toLowerCase()] = true));
-  window.addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
-
+  // Controls
   window.addEventListener("keydown", (e) => {
     keys[e.key.toLowerCase()] = true;
     if (e.code === "Space") keys["space"] = true;
   });
-
   window.addEventListener("keyup", (e) => {
     keys[e.key.toLowerCase()] = false;
     if (e.code === "Space") keys["space"] = false;
   });
 
-  // Mouse drag for camera rotation
+  // Mouse drag
   window.addEventListener("mousedown", (e) => {
     if (e.button === 0) {
-      // Left mouse button
       isDragging = true;
       previousMouseX = e.clientX;
     }
   });
-
   window.addEventListener("mouseup", (e) => {
-    if (e.button === 0) {
-      isDragging = false;
-    }
+    if (e.button === 0) isDragging = false;
   });
-
   window.addEventListener("mousemove", (e) => {
     if (isDragging) {
       const deltaX = e.clientX - previousMouseX;
-      const deltaY = e.movementY; // or e.clientY - previousMouseY
+      const deltaY = e.movementY;
 
       cameraAngle -= deltaX * dragRotateSpeed;
-
-      // Adjust camera height with vertical drag (clamped)
       cameraHeight -= deltaY * verticalDragSpeed;
       cameraHeight = Math.max(
         minCameraHeight,
@@ -175,117 +169,125 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+// ==============================
+// 🧠 Game Loop
+// ==============================
 function animate() {
   requestAnimationFrame(animate);
-
-  updateCar();
-  updateCamera();
-  updateWheelRotation();
-
+  updateCar(playerCar);
+  updateWheelRotation(playerCar);
+  updateCamera(playerCar);
   renderer.render(scene, camera);
 }
 
-function updateCar() {
-  // Forward
+// ==============================
+// 🧠 Car Movement
+// ==============================
+function updateCar(carObj) {
+  const { mesh } = carObj;
+
+  const maxSpeed = 0.5;
+  const acceleration = 0.01;
+  const friction = 0.01;
+  const angularAcceleration = 0.002;
+  const angularFriction = 0.01;
+  const maxAngularSpeed = 0.03;
+  const handbrakeTurnBoost = 1.8;
+  const handbrakeFrictionFactor = 0.4;
+
+  // Acceleration
   if (keys["w"]) {
-    velocity += acceleration;
+    carObj.velocity += keys["space"] ? acceleration * 0.5 : acceleration;
   }
-  // Backward
   if (keys["s"]) {
-    velocity -= acceleration;
+    carObj.velocity -= keys["space"] ? acceleration * 0.5 : acceleration;
   }
 
   // Clamp speed
-  velocity = Math.max(-maxSpeed, Math.min(maxSpeed, velocity));
+  carObj.velocity = Math.max(-maxSpeed, Math.min(maxSpeed, carObj.velocity));
 
-  // Friction / natural deceleration
-  if (!keys["w"] && !keys["s"]) {
-    if (velocity > 0) {
-      velocity -= friction;
-      if (velocity < 0) velocity = 0;
-    } else if (velocity < 0) {
-      velocity += friction;
-      if (velocity > 0) velocity = 0;
-    }
-  }
-
-  let turnBoost = keys["space"] ? handbrakeAngularBoost : 1.0;
-
-  // Smooth turning logic
-  if (keys["a"]) {
-    angularVelocity += angularAcceleration * turnBoost;
-  }
-  if (keys["d"]) {
-    angularVelocity -= angularAcceleration * turnBoost;
-  }
-
-  let effectiveFriction = keys["space"]
-    ? friction * handbrakeFrictionMultiplier
+  // Friction
+  const effectiveFriction = keys["space"]
+    ? friction * handbrakeFrictionFactor
     : friction;
-
-  // Apply angular friction
   if (!keys["w"] && !keys["s"]) {
-    if (velocity > 0) {
-      velocity -= effectiveFriction;
-      if (velocity < 0) velocity = 0;
-    } else if (velocity < 0) {
-      velocity += effectiveFriction;
-      if (velocity > 0) velocity = 0;
+    if (carObj.velocity > 0) {
+      carObj.velocity -= effectiveFriction;
+      if (carObj.velocity < 0) carObj.velocity = 0;
+    } else if (carObj.velocity < 0) {
+      carObj.velocity += effectiveFriction;
+      if (carObj.velocity > 0) carObj.velocity = 0;
     }
   }
 
-  // Clamp turn speed
-  angularVelocity = Math.max(
+  // Turning
+  const turnBoost = keys["space"] ? handbrakeTurnBoost : 1.0;
+  if (keys["a"]) carObj.angularVelocity += angularAcceleration * turnBoost;
+  if (keys["d"]) carObj.angularVelocity -= angularAcceleration * turnBoost;
+
+  if (!keys["a"] && !keys["d"]) {
+    if (carObj.angularVelocity > 0) {
+      carObj.angularVelocity -= angularFriction;
+      if (carObj.angularVelocity < 0) carObj.angularVelocity = 0;
+    } else if (carObj.angularVelocity < 0) {
+      carObj.angularVelocity += angularFriction;
+      if (carObj.angularVelocity > 0) carObj.angularVelocity = 0;
+    }
+  }
+
+  // Clamp turning
+  carObj.angularVelocity = Math.max(
     -maxAngularSpeed,
-    Math.min(maxAngularSpeed, angularVelocity)
+    Math.min(maxAngularSpeed, carObj.angularVelocity)
   );
 
-  // Turning is only allowed while moving
-  if (Math.abs(velocity) > 0.01) {
-    car.rotation.y += angularVelocity * (velocity / maxSpeed);
+  // Only turn while moving
+  if (Math.abs(carObj.velocity) > 0.01) {
+    mesh.rotation.y += carObj.angularVelocity * (carObj.velocity / maxSpeed);
   }
 
   // Apply movement
-  car.position.x -= Math.sin(car.rotation.y) * velocity;
-  car.position.z -= Math.cos(car.rotation.y) * velocity;
+  mesh.position.x -= Math.sin(mesh.rotation.y) * carObj.velocity;
+  mesh.position.z -= Math.cos(mesh.rotation.y) * carObj.velocity;
 }
 
-function updateCamera() {
-  const offsetX = Math.sin(cameraAngle) * cameraRadius;
-  const offsetZ = Math.cos(cameraAngle) * cameraRadius;
+// ==============================
+// 🛞 Wheel Rotation
+// ==============================
+function updateWheelRotation(carObj) {
+  const { mesh, wheels, lastPosition } = carObj;
+  const currentPos = mesh.position.clone();
+  const movementVec = currentPos.clone().sub(lastPosition);
+  lastPosition.copy(currentPos);
 
-  camera.position.x = car.position.x + offsetX;
-  camera.position.z = car.position.z + offsetZ;
-  camera.position.y = car.position.y + cameraHeight;
-
-  camera.lookAt(car.position);
-}
-
-function updateWheelRotation() {
-  const currentPos = car.position.clone();
-  const movementVec = currentPos.clone().sub(lastCarPosition);
-  lastCarPosition.copy(currentPos);
-
-  // No movement → no rotation
   if (movementVec.length() === 0) return;
 
-  // Get car's forward direction vector
   const forward = new THREE.Vector3(
-    -Math.sin(car.rotation.y),
+    -Math.sin(mesh.rotation.y),
     0,
-    -Math.cos(car.rotation.y)
+    -Math.cos(mesh.rotation.y)
   );
-
-  // Dot product: +1 = forward, -1 = reverse
   const directionSign = Math.sign(forward.dot(movementVec));
-
-  // Compute how much to rotate wheels
   const wheelRadius = 0.4;
-  const distanceMoved = movementVec.length();
-  const rotationAmount = -directionSign * (distanceMoved / wheelRadius);
+  const rotationAmount = -directionSign * (movementVec.length() / wheelRadius);
 
-  // Apply to all wheels
   for (const wheel of wheels) {
     wheel.rotation.x += rotationAmount;
   }
+}
+
+// ==============================
+// 🎥 Camera
+// ==============================
+function updateCamera(carObj) {
+  const { mesh } = carObj;
+
+  const offsetX = Math.sin(cameraAngle) * cameraRadius;
+  const offsetZ = Math.cos(cameraAngle) * cameraRadius;
+
+  camera.position.x = mesh.position.x + offsetX;
+  camera.position.z = mesh.position.z + offsetZ;
+  camera.position.y = mesh.position.y + cameraHeight;
+
+  camera.lookAt(mesh.position);
 }
